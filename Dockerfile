@@ -3,6 +3,9 @@ FROM node:22-alpine AS builder
 
 WORKDIR /app
 
+ARG VITE_BASE_PATH=/pomodoro/
+ENV VITE_BASE_PATH=${VITE_BASE_PATH}
+
 # Copia manifests primeiro para aproveitar cache de camadas do Docker
 COPY package*.json ./
 
