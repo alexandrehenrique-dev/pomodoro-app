@@ -6,10 +6,17 @@ on:
       - main
   workflow_dispatch:
 
+concurrency:
+  group: deploy-pomodoro-app-genesis-lab
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
 jobs:
   deploy:
     name: Build e deploy no genesis-lab
-    runs-on: self-hosted
+    runs-on: [self-hosted, linux, x64, genesis]
 
     env:
       IMAGE_NAME: pomodoro-app
@@ -21,17 +28,13 @@ jobs:
       - name: Checkout do repositório
         uses: actions/checkout@v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-
-      - name: Instalar dependências
-        run: npm ci
-
-      - name: Build da aplicação
-        run: npm run build
+      - name: Mostrar contexto do runner
+        run: |
+          echo "Runner: $RUNNER_NAME"
+          echo "Workspace: $GITHUB_WORKSPACE"
+          whoami
+          pwd
+          docker --version
 
       - name: Build da imagem Docker
         run: docker build -t ${{ env.IMAGE_NAME }}:latest .
@@ -51,4 +54,10 @@ jobs:
             ${{ env.IMAGE_NAME }}:latest
 
       - name: Verificar container em execução
-        run: docker ps --filter "name=${{ env.CONTAINER_NAME }}"
+        run: docker ps --filter "name=${{ env.CONTAINER_NAME }}" --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
+
+      - name: Validar aplicação publicada
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --location --max-time 15 "http://localhost:${{ env.HOST_PORT }}" >/dev/null
+          echo "Pomodoro App publicado com sucesso em http://localhost:${{ env.HOST_PORT }}"
