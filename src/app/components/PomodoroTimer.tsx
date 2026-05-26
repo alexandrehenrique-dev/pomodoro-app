@@ -72,6 +72,10 @@ export function PomodoroTimer({
       toast.success("Ciclo de foco concluído!", {
         description: "Hora da pausa curta. Relaxe um pouco!",
       });
+    } else if (currentPhase === "longBreak") {
+      toast.success("Ciclo de foco concluído!", {
+        description: "Hora da pausa longa. Você merece descansar bem!",
+      });
     } else if (currentPhase === "focus" && completedFocusCycles > 0) {
       toast.info("Pausa concluída! 💪", {
         description: "Pronto para o próximo ciclo de foco?",

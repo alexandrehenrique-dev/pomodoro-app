@@ -61,10 +61,21 @@ function phaseDurationMs(phase: TimerPhase, settings: PomodoroSettings): number 
   }
 }
 
-// Transição de fase no fluxo contínuo (sem longBreak automático).
-// A conclusão da sessão é tratada em advancePhase antes de chamar esta função.
-function nextPhase(current: TimerPhase): "focus" | "shortBreak" {
-  return current === "focus" ? "shortBreak" : "focus";
+/**
+ * Decide a próxima fase do fluxo contínuo.
+ *
+ * Regras clássicas do Pomodoro:
+ *  - Após foco: a cada LONG_BREAK_INTERVAL ciclos completos → longBreak; demais → shortBreak.
+ *  - Após qualquer pausa: volta para focus.
+ *
+ * A verificação de conclusão (>= totalCycles) acontece em advancePhase ANTES desta função,
+ * portanto aqui `newTotalCycles` nunca atinge o limite de encerramento.
+ */
+const LONG_BREAK_INTERVAL = 4; // Número de focos antes de uma pausa longa (clássico Pomodoro)
+
+function nextPhase(current: TimerPhase, newTotalCycles: number): TimerPhase {
+  if (current !== "focus") return "focus";
+  return newTotalCycles % LONG_BREAK_INTERVAL === 0 ? "longBreak" : "shortBreak";
 }
 
 function createInitialSession(
@@ -167,8 +178,8 @@ export function usePomodoroTimer({
         return;
       }
 
-      // ── Transição normal: foco → pausa curta → foco → ... ──────────────────
-      const nextPh = nextPhase(current);
+      // ── Transição normal: foco → shortBreak/longBreak → foco → ... ──────────
+      const nextPh = nextPhase(current, newTotalCycles);
       const newBlock = isFocus
         ? fromSession.completedCyclesInCurrentBlock + 1
         : fromSession.completedCyclesInCurrentBlock;
