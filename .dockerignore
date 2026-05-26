@@ -1,0 +1,36 @@
+# ── Dependencies e build local ────────────────────────────────────────────────
+node_modules
+dist
+build
+
+# ── Git ───────────────────────────────────────────────────────────────────────
+.git
+.gitignore
+
+# ── CI/CD (não precisa ir para imagem) ───────────────────────────────────────
+.github
+
+# ── Logs ──────────────────────────────────────────────────────────────────────
+*.log
+logs
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+
+# ── Ambiente ──────────────────────────────────────────────────────────────────
+.env
+.env.*
+
+# ── Cobertura de testes ───────────────────────────────────────────────────────
+coverage
+.nyc_output
+
+# ── IDE e OS ──────────────────────────────────────────────────────────────────
+.vscode
+.idea
+.DS_Store
+Thumbs.db
+
+# ── Documentação de referência (não necessária para build) ────────────────────
+guidelines
+default_shadcn_theme.css

@@ -1,10 +1,18 @@
-import { useState, useEffect } from "react";
+import { useState, useCallback } from "react";
 import { ThemeProvider } from "next-themes";
 import { Toaster } from "sonner";
 import { NewPomodoroModal } from "./components/NewPomodoroModal";
 import { PomodoroTimer } from "./components/PomodoroTimer";
 import { SessionHistory } from "./components/SessionHistory";
 import { EmptyState } from "./components/EmptyState";
+import { PomodoroStorage } from "../services/pomodoroStorage";
+import type {
+  ActivePomodoroSession,
+  PomodoroHistoryItem,
+  PomodoroSettings,
+} from "../types/pomodoro";
+
+// ─── Types used by UI-layer (legacy shape kept for compatibility) ──────────────
 
 export interface PomodoroConfig {
   taskName: string;
@@ -24,31 +32,82 @@ export interface SessionHistoryItem {
   status: "completed" | "interrupted";
 }
 
-export type SessionPhase = "focus" | "shortBreak" | "longBreak";
+// ─── App ──────────────────────────────────────────────────────────────────────
 
 export default function App() {
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [currentSession, setCurrentSession] = useState<PomodoroConfig | null>(null);
-  const [sessionHistory, setSessionHistory] = useState<SessionHistoryItem[]>([]);
 
-  const handleStartSession = (config: PomodoroConfig) => {
-    setCurrentSession(config);
+  // Restore active session from localStorage
+  const [currentConfig, setCurrentConfig] = useState<PomodoroConfig | null>(() => {
+    const persisted = PomodoroStorage.getActiveSession();
+    if (!persisted) return null;
+    return {
+      taskName: persisted.task.name,
+      description: persisted.task.description,
+      focusDuration: persisted.settings.focusMinutes,
+      shortBreakDuration: persisted.settings.shortBreakMinutes,
+      longBreakDuration: persisted.settings.longBreakMinutes,
+      cyclesBeforeLongBreak: persisted.settings.cyclesBeforeLongBreak,
+      soundEnabled: persisted.settings.soundEnabled,
+    };
+  });
+
+  // Restore history from localStorage
+  const [sessionHistory, setSessionHistory] = useState<SessionHistoryItem[]>(() => {
+    const stored = PomodoroStorage.getHistory();
+    return stored.map((item) => ({
+      id: item.id,
+      taskName: item.taskName,
+      date: item.startedAt,
+      cyclesCompleted: item.completedFocusCycles,
+      status: item.status === "completed" ? "completed" : "interrupted",
+    }));
+  });
+
+  const handleStartSession = useCallback((config: PomodoroConfig) => {
+    setCurrentConfig(config);
     setIsModalOpen(false);
-  };
+  }, []);
 
-  const handleEndSession = (cyclesCompleted: number, status: "completed" | "interrupted") => {
-    if (currentSession) {
-      const newHistoryItem: SessionHistoryItem = {
-        id: Date.now().toString(),
-        taskName: currentSession.taskName,
-        date: new Date().toISOString(),
-        cyclesCompleted,
-        status,
+  const handleEndSession = useCallback(
+    (session: ActivePomodoroSession) => {
+      // Save to persistent history
+      const historyItem: PomodoroHistoryItem = {
+        id: crypto.randomUUID(),
+        taskName: session.task.name,
+        taskDescription: session.task.description,
+        startedAt: new Date(session.startedAt).toISOString(),
+        endedAt: new Date().toISOString(),
+        completedFocusCycles: session.completedFocusCycles,
+        settings: session.settings,
+        totalDurationMs: Date.now() - session.startedAt,
+        status:
+          session.completedFocusCycles > 0 ? "manually_ended" : "abandoned",
       };
-      setSessionHistory([newHistoryItem, ...sessionHistory]);
-    }
-    setCurrentSession(null);
-  };
+      PomodoroStorage.addHistoryItem(historyItem);
+
+      // Update UI history list
+      const uiItem: SessionHistoryItem = {
+        id: historyItem.id,
+        taskName: historyItem.taskName,
+        date: historyItem.startedAt,
+        cyclesCompleted: historyItem.completedFocusCycles,
+        status: session.completedFocusCycles > 0 ? "completed" : "interrupted",
+      };
+      setSessionHistory((prev) => [uiItem, ...prev]);
+      setCurrentConfig(null);
+    },
+    []
+  );
+
+  // Map PomodoroConfig → PomodoroSettings (for hook)
+  const settingsFromConfig = (cfg: PomodoroConfig): PomodoroSettings => ({
+    focusMinutes: cfg.focusDuration,
+    shortBreakMinutes: cfg.shortBreakDuration,
+    longBreakMinutes: cfg.longBreakDuration,
+    cyclesBeforeLongBreak: cfg.cyclesBeforeLongBreak,
+    soundEnabled: cfg.soundEnabled,
+  });
 
   return (
     <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
@@ -64,9 +123,12 @@ export default function App() {
 
           {/* Main Content */}
           <main>
-            {currentSession ? (
+            {currentConfig ? (
               <PomodoroTimer
-                config={currentSession}
+                taskName={currentConfig.taskName}
+                taskDescription={currentConfig.description}
+                settings={settingsFromConfig(currentConfig)}
+                sessionStartedAt={Date.now()}
                 onEndSession={handleEndSession}
               />
             ) : (

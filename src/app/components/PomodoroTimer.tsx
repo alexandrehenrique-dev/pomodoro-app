@@ -1,155 +1,133 @@
-import { useState, useEffect, useRef } from "react";
 import * as Progress from "@radix-ui/react-progress";
-import { Play, Pause, RotateCcw, SkipForward, X, Coffee, Brain } from "lucide-react";
+import {
+  Play,
+  Pause,
+  RotateCcw,
+  SkipForward,
+  X,
+  Coffee,
+  Brain,
+  VolumeX,
+} from "lucide-react";
 import { toast } from "sonner";
-import type { PomodoroConfig, SessionPhase } from "../App";
+import { usePomodoroTimer } from "../../hooks/usePomodoroTimer";
+import type { PomodoroSettings, ActivePomodoroSession } from "../../types/pomodoro";
+import { PomodoroStorage } from "../../services/pomodoroStorage";
+import { formatMs } from "../../utils/time";
+import { useEffect } from "react";
 
 interface PomodoroTimerProps {
-  config: PomodoroConfig;
-  onEndSession: (cyclesCompleted: number, status: "completed" | "interrupted") => void;
+  taskName: string;
+  taskDescription?: string;
+  settings: PomodoroSettings;
+  sessionStartedAt: number;
+  onEndSession: (session: ActivePomodoroSession) => void;
 }
 
-export function PomodoroTimer({ config, onEndSession }: PomodoroTimerProps) {
-  const [phase, setPhase] = useState<SessionPhase>("focus");
-  const [cyclesCompleted, setCyclesCompleted] = useState(0);
-  const [timeLeft, setTimeLeft] = useState(config.focusDuration * 60);
-  const [isRunning, setIsRunning] = useState(false);
-  const [isPaused, setIsPaused] = useState(false);
-  const intervalRef = useRef<NodeJS.Timeout | null>(null);
+export function PomodoroTimer({
+  taskName,
+  taskDescription,
+  settings,
+  sessionStartedAt,
+  onEndSession,
+}: PomodoroTimerProps) {
+  const {
+    session,
+    remainingMs,
+    progressPct,
+    start,
+    pause,
+    resume,
+    reset,
+    skip,
+    end,
+    soundFailed,
+    clearSoundFailed,
+  } = usePomodoroTimer({
+    taskName,
+    taskDescription,
+    settings,
+    onSessionEnd: onEndSession,
+  });
 
-  const getCurrentPhaseDuration = () => {
-    switch (phase) {
-      case "focus":
-        return config.focusDuration * 60;
-      case "shortBreak":
-        return config.shortBreakDuration * 60;
-      case "longBreak":
-        return config.longBreakDuration * 60;
-    }
-  };
+  const { currentPhase, completedFocusCycles, previousPhase } = session;
 
-  const formatTime = (seconds: number) => {
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    return `${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
-  };
+  const isIdle = currentPhase === "idle";
+  const isRunning = session.isRunning;
+  const isPaused = currentPhase === "paused";
 
-  const playSound = () => {
-    if (!config.soundEnabled) return;
-    const audio = new Audio("data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdJivrJBhNjVgodDbq2EcBj+a2/LDciUFLIHO8tiJNwgZaLvt559NEAxQp+PwtmMcBjiR1/LMeSwFJHfH8N2QQAoUXrTp66hVFApGn+DyvmwhBTGH0fPTgjMGHm7A7+OZSA0PVK3m773CYBwFOI/X88x5LAUkd8fw3ZBBChRetenut1YUCkag4vK+bCEFMYjS89OCMwYfb8Lw45lIDQ5VruXwvsNgHAU4kNjzzHkrBSR3x/DdkEEKFFy16Oyv");
-    audio.play().catch(() => {});
-  };
+  const displayPhase =
+    currentPhase === "paused" ? previousPhase ?? "focus" : currentPhase;
 
-  const handlePhaseComplete = () => {
-    playSound();
-
-    if (phase === "focus") {
-      const newCycles = cyclesCompleted + 1;
-      setCyclesCompleted(newCycles);
-
-      if (newCycles % config.cyclesBeforeLongBreak === 0) {
-        setPhase("longBreak");
-        setTimeLeft(config.longBreakDuration * 60);
-        toast.success("Ciclo de foco concluído!", {
-          description: "Hora da pausa longa. Descanse bem!",
-        });
-      } else {
-        setPhase("shortBreak");
-        setTimeLeft(config.shortBreakDuration * 60);
-        toast.success("Ciclo de foco concluído!", {
-          description: "Hora da pausa curta. Relaxe um pouco!",
-        });
-      }
-    } else {
-      setPhase("focus");
-      setTimeLeft(config.focusDuration * 60);
-      toast.info("Pausa concluída!", {
+  // Toast on phase advance
+  useEffect(() => {
+    if (currentPhase === "shortBreak") {
+      toast.success("Ciclo de foco concluído! 🎉", {
+        description: "Hora da pausa curta. Relaxe um pouco!",
+      });
+    } else if (currentPhase === "longBreak") {
+      toast.success("Ciclo de foco concluído! 🎉", {
+        description: "Hora da pausa longa. Descanse bem!",
+      });
+    } else if (currentPhase === "focus" && completedFocusCycles > 0) {
+      toast.info("Pausa concluída! 💪", {
         description: "Pronto para o próximo ciclo de foco?",
       });
     }
+  }, [currentPhase]); // eslint-disable-line react-hooks/exhaustive-deps
 
-    setIsRunning(false);
-    setIsPaused(false);
-  };
-
-  const handleStart = () => {
-    setIsRunning(true);
-    setIsPaused(false);
-  };
-
-  const handlePause = () => {
-    setIsRunning(false);
-    setIsPaused(true);
-  };
-
-  const handleReset = () => {
-    setIsRunning(false);
-    setIsPaused(false);
-    setPhase("focus");
-    setCyclesCompleted(0);
-    setTimeLeft(config.focusDuration * 60);
-  };
-
-  const handleSkip = () => {
-    handlePhaseComplete();
-  };
-
-  const handleEnd = () => {
-    if (intervalRef.current) {
-      clearInterval(intervalRef.current);
-    }
-    onEndSession(cyclesCompleted, cyclesCompleted > 0 ? "completed" : "interrupted");
-  };
-
+  // Visual fallback when sound fails
   useEffect(() => {
-    if (isRunning) {
-      intervalRef.current = setInterval(() => {
-        setTimeLeft((prev) => {
-          if (prev <= 1) {
-            handlePhaseComplete();
-            return getCurrentPhaseDuration();
-          }
-          return prev - 1;
-        });
-      }, 1000);
-    } else {
-      if (intervalRef.current) {
-        clearInterval(intervalRef.current);
-      }
+    if (soundFailed) {
+      toast.warning("Sem som", {
+        description:
+          "Não foi possível tocar o áudio. Verifique as configurações do navegador.",
+        onDismiss: clearSoundFailed,
+        onAutoClose: clearSoundFailed,
+      });
     }
-
-    return () => {
-      if (intervalRef.current) {
-        clearInterval(intervalRef.current);
-      }
-    };
-  }, [isRunning, phase]);
-
-  const progress = ((getCurrentPhaseDuration() - timeLeft) / getCurrentPhaseDuration()) * 100;
+  }, [soundFailed, clearSoundFailed]);
 
   const getPhaseLabel = () => {
-    switch (phase) {
+    switch (displayPhase) {
       case "focus":
         return "Foco";
       case "shortBreak":
         return "Pausa curta";
       case "longBreak":
         return "Pausa longa";
+      default:
+        return "Foco";
     }
   };
 
   const getPhaseIcon = () => {
-    switch (phase) {
+    switch (displayPhase) {
       case "focus":
         return <Brain className="h-6 w-6" />;
-      case "shortBreak":
-      case "longBreak":
+      default:
         return <Coffee className="h-6 w-6" />;
     }
   };
 
   return (
     <div className="space-y-8">
+      {/* Sound-failed visual alert */}
+      {soundFailed && (
+        <div className="flex items-center gap-3 rounded-lg border border-destructive/50 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+          <VolumeX className="h-4 w-4 flex-shrink-0" />
+          <span>
+            Áudio bloqueado pelo navegador. Interaja com a página para habilitar o som.
+          </span>
+          <button
+            onClick={clearSoundFailed}
+            className="ml-auto rounded p-0.5 hover:bg-destructive/20"
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      )}
+
       {/* Main Timer Card */}
       <div className="relative overflow-hidden rounded-xl border border-border bg-card shadow-lg">
         {/* Header */}
@@ -158,14 +136,14 @@ export function PomodoroTimer({ config, onEndSession }: PomodoroTimerProps) {
             <div className="flex-1">
               <div className="mb-1 flex items-center gap-2">
                 {getPhaseIcon()}
-                <h2 className="text-xl font-medium">{config.taskName}</h2>
+                <h2 className="text-xl font-medium">{taskName}</h2>
               </div>
-              {config.description && (
-                <p className="text-sm text-muted-foreground">{config.description}</p>
+              {taskDescription && (
+                <p className="text-sm text-muted-foreground">{taskDescription}</p>
               )}
             </div>
             <button
-              onClick={handleEnd}
+              onClick={end}
               className="rounded-lg p-2 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
               title="Encerrar sessão"
             >
@@ -179,35 +157,37 @@ export function PomodoroTimer({ config, onEndSession }: PomodoroTimerProps) {
           <div className="mb-4 inline-flex items-center gap-2 rounded-full bg-muted px-4 py-1.5">
             <span className="text-sm font-medium">{getPhaseLabel()}</span>
             {isPaused && (
-              <span className="inline-flex h-2 w-2 rounded-full bg-destructive"></span>
+              <span className="inline-flex h-2 w-2 rounded-full bg-destructive" />
             )}
           </div>
 
           <div className="mb-8 font-mono text-7xl font-light tracking-tight md:text-8xl">
-            {formatTime(timeLeft)}
+            {formatMs(remainingMs)}
           </div>
 
           <Progress.Root
-            value={progress}
+            value={progressPct}
             className="relative h-2 w-full overflow-hidden rounded-full bg-muted"
           >
             <Progress.Indicator
               className="h-full w-full flex-1 bg-primary transition-all duration-300 ease-out"
-              style={{ transform: `translateX(-${100 - progress}%)` }}
+              style={{ transform: `translateX(-${100 - progressPct}%)` }}
             />
           </Progress.Root>
 
           <div className="mt-6 text-sm text-muted-foreground">
-            Ciclos concluídos: {cyclesCompleted}
+            Ciclos concluídos:{" "}
+            <span className="font-medium text-foreground">{completedFocusCycles}</span>
           </div>
         </div>
 
         {/* Controls */}
         <div className="border-t border-border bg-muted/30 px-6 py-4">
           <div className="flex flex-wrap justify-center gap-3">
-            {!isRunning && !isPaused && (
+            {/* Start (from idle) */}
+            {isIdle && (
               <button
-                onClick={handleStart}
+                onClick={start}
                 className="flex items-center gap-2 rounded-lg bg-primary px-6 py-2.5 text-primary-foreground shadow-sm transition-all hover:opacity-90"
               >
                 <Play className="h-4 w-4" />
@@ -215,9 +195,21 @@ export function PomodoroTimer({ config, onEndSession }: PomodoroTimerProps) {
               </button>
             )}
 
+            {/* After phase ends — user must explicitly start next */}
+            {!isIdle && !isRunning && !isPaused && (
+              <button
+                onClick={start}
+                className="flex items-center gap-2 rounded-lg bg-primary px-6 py-2.5 text-primary-foreground shadow-sm transition-all hover:opacity-90"
+              >
+                <Play className="h-4 w-4" />
+                Iniciar
+              </button>
+            )}
+
+            {/* Pause */}
             {isRunning && (
               <button
-                onClick={handlePause}
+                onClick={pause}
                 className="flex items-center gap-2 rounded-lg bg-primary px-6 py-2.5 text-primary-foreground shadow-sm transition-all hover:opacity-90"
               >
                 <Pause className="h-4 w-4" />
@@ -225,9 +217,10 @@ export function PomodoroTimer({ config, onEndSession }: PomodoroTimerProps) {
               </button>
             )}
 
+            {/* Resume */}
             {isPaused && (
               <button
-                onClick={handleStart}
+                onClick={resume}
                 className="flex items-center gap-2 rounded-lg bg-primary px-6 py-2.5 text-primary-foreground shadow-sm transition-all hover:opacity-90"
               >
                 <Play className="h-4 w-4" />
@@ -235,21 +228,27 @@ export function PomodoroTimer({ config, onEndSession }: PomodoroTimerProps) {
               </button>
             )}
 
-            <button
-              onClick={handleReset}
-              className="flex items-center gap-2 rounded-lg border border-border bg-background px-4 py-2.5 transition-colors hover:bg-muted"
-            >
-              <RotateCcw className="h-4 w-4" />
-              Resetar
-            </button>
+            {/* Reset current phase */}
+            {!isIdle && (
+              <button
+                onClick={reset}
+                className="flex items-center gap-2 rounded-lg border border-border bg-background px-4 py-2.5 transition-colors hover:bg-muted"
+              >
+                <RotateCcw className="h-4 w-4" />
+                Resetar
+              </button>
+            )}
 
-            <button
-              onClick={handleSkip}
-              className="flex items-center gap-2 rounded-lg border border-border bg-background px-4 py-2.5 transition-colors hover:bg-muted"
-            >
-              <SkipForward className="h-4 w-4" />
-              Avançar
-            </button>
+            {/* Skip phase */}
+            {!isIdle && (
+              <button
+                onClick={skip}
+                className="flex items-center gap-2 rounded-lg border border-border bg-background px-4 py-2.5 transition-colors hover:bg-muted"
+              >
+                <SkipForward className="h-4 w-4" />
+                Avançar
+              </button>
+            )}
           </div>
         </div>
       </div>

@@ -4,6 +4,8 @@ import * as Label from "@radix-ui/react-label";
 import * as Switch from "@radix-ui/react-switch";
 import { X, Volume2 } from "lucide-react";
 import type { PomodoroConfig } from "../App";
+import { PomodoroStorage } from "../../services/pomodoroStorage";
+import { unlockAudio, playChime } from "../../services/soundService";
 
 interface NewPomodoroModalProps {
   open: boolean;
@@ -12,17 +14,30 @@ interface NewPomodoroModalProps {
 }
 
 export function NewPomodoroModal({ open, onOpenChange, onStart }: NewPomodoroModalProps) {
+  const saved = PomodoroStorage.getSettings();
+
   const [taskName, setTaskName] = useState("");
   const [description, setDescription] = useState("");
-  const [focusDuration, setFocusDuration] = useState(25);
-  const [shortBreakDuration, setShortBreakDuration] = useState(5);
-  const [longBreakDuration, setLongBreakDuration] = useState(15);
-  const [cyclesBeforeLongBreak, setCyclesBeforeLongBreak] = useState(4);
-  const [soundEnabled, setSoundEnabled] = useState(true);
+  const [focusDuration, setFocusDuration] = useState(saved.focusMinutes);
+  const [shortBreakDuration, setShortBreakDuration] = useState(saved.shortBreakMinutes);
+  const [longBreakDuration, setLongBreakDuration] = useState(saved.longBreakMinutes);
+  const [cyclesBeforeLongBreak, setCyclesBeforeLongBreak] = useState(
+    saved.cyclesBeforeLongBreak
+  );
+  const [soundEnabled, setSoundEnabled] = useState(saved.soundEnabled);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!taskName.trim()) return;
+
+    // Persist settings for next time
+    PomodoroStorage.saveSettings({
+      focusMinutes: focusDuration,
+      shortBreakMinutes: shortBreakDuration,
+      longBreakMinutes: longBreakDuration,
+      cyclesBeforeLongBreak,
+      soundEnabled,
+    });
 
     onStart({
       taskName: taskName.trim(),
@@ -34,19 +49,21 @@ export function NewPomodoroModal({ open, onOpenChange, onStart }: NewPomodoroMod
       soundEnabled,
     });
 
-    // Reset form
+    // Reset text fields only
     setTaskName("");
     setDescription("");
-    setFocusDuration(25);
-    setShortBreakDuration(5);
-    setLongBreakDuration(15);
-    setCyclesBeforeLongBreak(4);
-    setSoundEnabled(true);
   };
 
-  const playTestSound = () => {
-    const audio = new Audio("data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdJivrJBhNjVgodDbq2EcBj+a2/LDciUFLIHO8tiJNwgZaLvt559NEAxQp+PwtmMcBjiR1/LMeSwFJHfH8N2QQAoUXrTp66hVFApGn+DyvmwhBTGH0fPTgjMGHm7A7+OZSA0PVK3m773CYBwFOI/X88x5LAUkd8fw3ZBBChRetenut1YUCkag4vK+bCEFMYjS89OCMwYfb8Lw45lIDQ5VruXwvsNgHAU4kNjzzHkrBSR3x/DdkEEKFFy16Oyv");
-    audio.play().catch(() => {});
+  const handleTestSound = async () => {
+    // This is a user gesture — use it to unlock audio
+    await unlockAudio();
+    const ok = await playChime();
+    if (!ok) {
+      // eslint-disable-next-line no-alert
+      alert(
+        "Não foi possível tocar o áudio. Verifique se o navegador está bloqueando o som."
+      );
+    }
   };
 
   return (
@@ -75,6 +92,7 @@ export function NewPomodoroModal({ open, onOpenChange, onStart }: NewPomodoroMod
                 placeholder="Ex: Estudar React"
                 className="w-full rounded-lg border border-input bg-input-background px-4 py-2.5 transition-colors focus:outline-none focus:ring-2 focus:ring-ring"
                 required
+                autoFocus
               />
             </div>
 
@@ -169,7 +187,7 @@ export function NewPomodoroModal({ open, onOpenChange, onStart }: NewPomodoroMod
               <div className="flex items-center gap-2">
                 <button
                   type="button"
-                  onClick={playTestSound}
+                  onClick={handleTestSound}
                   className="rounded-lg p-2 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
                   title="Testar som"
                 >
@@ -181,7 +199,7 @@ export function NewPomodoroModal({ open, onOpenChange, onStart }: NewPomodoroMod
                   onCheckedChange={setSoundEnabled}
                   className="relative h-6 w-11 rounded-full bg-switch-background transition-colors data-[state=checked]:bg-primary"
                 >
-                  <Switch.Thumb className="block h-5 w-5 translate-x-0.5 rounded-full bg-white shadow-sm transition-transform data-[state=checked]:translate-x-[1.375rem]" />
+                  <Switch.Thumb className="block h-5 w-5 translate-x-0.5 rounded-full bg-switch-thumb shadow-sm transition-transform data-[state=checked]:translate-x-[1.375rem]" />
                 </Switch.Root>
               </div>
             </div>

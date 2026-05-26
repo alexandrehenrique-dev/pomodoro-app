@@ -21,7 +21,9 @@
   --border: rgba(0, 0, 0, 0.1);
   --input: transparent;
   --input-background: #f3f3f5;
+  --input-foreground: oklch(0.145 0 0);
   --switch-background: #cbced4;
+  --switch-thumb: #ffffff;
   --font-weight-medium: 500;
   --font-weight-normal: 400;
   --ring: oklch(0.708 0 0);
@@ -56,11 +58,16 @@
   --muted-foreground: oklch(0.708 0 0);
   --accent: oklch(0.269 0 0);
   --accent-foreground: oklch(0.985 0 0);
-  --destructive: oklch(0.396 0.141 25.723);
-  --destructive-foreground: oklch(0.637 0.237 25.331);
+  /* Brighter red: legível como texto sobre fundos escuros (≈ WCAG AA) */
+  --destructive: oklch(0.65 0.22 27.325);
+  --destructive-foreground: oklch(0.985 0 0);
   --border: oklch(0.269 0 0);
   --input: oklch(0.269 0 0);
   --ring: oklch(0.439 0 0);
+  /* Input background permanece claro em dark mode; texto e placeholder precisam ser escuros */
+  --input-foreground: oklch(0.145 0 0);
+  /* Switch thumb escuro para contrastar com bg-primary branco no estado ativado */
+  --switch-thumb: oklch(0.205 0 0);
   --font-weight-medium: 500;
   --font-weight-normal: 400;
   --chart-1: oklch(0.488 0.243 264.376);
@@ -98,7 +105,9 @@
   --color-border: var(--border);
   --color-input: var(--input);
   --color-input-background: var(--input-background);
+  --color-input-foreground: var(--input-foreground);
   --color-switch-background: var(--switch-background);
+  --color-switch-thumb: var(--switch-thumb);
   --color-ring: var(--ring);
   --color-chart-1: var(--chart-1);
   --color-chart-2: var(--chart-2);
@@ -177,5 +186,20 @@
     font-size: var(--text-base);
     font-weight: var(--font-weight-normal);
     line-height: 1.5;
+    /* Garante texto legível quando o fundo do input é claro (inclusive no tema dark) */
+    color: var(--input-foreground);
+    /* Instrui o browser a renderizar controles nativos (spinner de number) no estilo claro */
+    color-scheme: light;
+  }
+
+  textarea {
+    color: var(--input-foreground);
+  }
+
+  input::placeholder,
+  textarea::placeholder {
+    /* muted-foreground é cinza médio — legível tanto no fundo claro quanto escuro */
+    color: var(--muted-foreground);
+    opacity: 1;
   }
 }
