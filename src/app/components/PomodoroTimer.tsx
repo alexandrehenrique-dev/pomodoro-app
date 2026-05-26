@@ -184,29 +184,24 @@ export function PomodoroTimer({
         {/* Controls */}
         <div className="border-t border-border bg-muted/30 px-6 py-4">
           <div className="flex flex-wrap justify-center gap-3">
-            {/* Start (from idle) */}
-            {isIdle && (
+            {/*
+              Fluxo contínuo: o usuário clica "Iniciar" uma única vez.
+              Após cada fase, a próxima começa automaticamente (isRunning permanece true).
+              "Iniciar" só aparece em dois casos:
+                1. Estado inicial (idle)
+                2. Após reset manual (timer parado, fase definida)
+            */}
+            {!isRunning && !isPaused && (
               <button
                 onClick={start}
                 className="flex items-center gap-2 rounded-lg bg-primary px-6 py-2.5 text-primary-foreground shadow-sm transition-all hover:opacity-90"
               >
                 <Play className="h-4 w-4" />
-                Iniciar
+                {isIdle ? "Iniciar" : "Iniciar"}
               </button>
             )}
 
-            {/* After phase ends — user must explicitly start next */}
-            {!isIdle && !isRunning && !isPaused && (
-              <button
-                onClick={start}
-                className="flex items-center gap-2 rounded-lg bg-primary px-6 py-2.5 text-primary-foreground shadow-sm transition-all hover:opacity-90"
-              >
-                <Play className="h-4 w-4" />
-                Iniciar
-              </button>
-            )}
-
-            {/* Pause */}
+            {/* Pausar — para o timer; "Continuar" retoma de onde parou */}
             {isRunning && (
               <button
                 onClick={pause}
@@ -217,7 +212,6 @@ export function PomodoroTimer({
               </button>
             )}
 
-            {/* Resume */}
             {isPaused && (
               <button
                 onClick={resume}
@@ -228,26 +222,25 @@ export function PomodoroTimer({
               </button>
             )}
 
-            {/* Reset current phase */}
+            {/* Resetar e Avançar só fazem sentido após o Iniciar inicial */}
             {!isIdle && (
-              <button
-                onClick={reset}
-                className="flex items-center gap-2 rounded-lg border border-border bg-background px-4 py-2.5 transition-colors hover:bg-muted"
-              >
-                <RotateCcw className="h-4 w-4" />
-                Resetar
-              </button>
-            )}
+              <>
+                <button
+                  onClick={reset}
+                  className="flex items-center gap-2 rounded-lg border border-border bg-background px-4 py-2.5 transition-colors hover:bg-muted"
+                >
+                  <RotateCcw className="h-4 w-4" />
+                  Resetar
+                </button>
 
-            {/* Skip phase */}
-            {!isIdle && (
-              <button
-                onClick={skip}
-                className="flex items-center gap-2 rounded-lg border border-border bg-background px-4 py-2.5 transition-colors hover:bg-muted"
-              >
-                <SkipForward className="h-4 w-4" />
-                Avançar
-              </button>
+                <button
+                  onClick={skip}
+                  className="flex items-center gap-2 rounded-lg border border-border bg-background px-4 py-2.5 transition-colors hover:bg-muted"
+                >
+                  <SkipForward className="h-4 w-4" />
+                  Avançar
+                </button>
+              </>
             )}
           </div>
         </div>

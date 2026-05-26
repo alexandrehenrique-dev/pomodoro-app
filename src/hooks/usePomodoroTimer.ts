@@ -158,7 +158,9 @@ export function usePomodoroTimer({
         remainingMs: phaseDurationMs(phase, fromSession.settings),
         completedFocusCycles: newTotalCycles,
         completedCyclesInCurrentBlock: newBlock,
-        isRunning: false, // pause after each phase so user starts intentionally
+        // Mantém isRunning do estado anterior: se estava rodando, a próxima fase
+        // inicia automaticamente (fluxo contínuo do método Pomodoro).
+        isRunning: fromSession.isRunning,
       };
 
       setSession(newSession);
@@ -256,14 +258,27 @@ export function usePomodoroTimer({
 
   const start = useCallback(() => {
     const now = Date.now();
-    setSession((prev) => ({
-      ...prev,
-      currentPhase: "focus",
-      currentPhaseStartedAt: now,
-      remainingMs: phaseDurationMs("focus", prev.settings),
-      pausedAt: undefined,
-      isRunning: true,
-    }));
+    setSession((prev) => {
+      if (prev.currentPhase === "idle") {
+        // Primeira vez: inicializa no modo foco
+        return {
+          ...prev,
+          currentPhase: "focus",
+          currentPhaseStartedAt: now,
+          remainingMs: phaseDurationMs("focus", prev.settings),
+          pausedAt: undefined,
+          isRunning: true,
+        };
+      }
+      // Pós-reset: fase e duração já estão corretos; apenas dispara o timer
+      // a partir de agora (currentPhaseStartedAt = now garante sem drift)
+      return {
+        ...prev,
+        currentPhaseStartedAt: now,
+        pausedAt: undefined,
+        isRunning: true,
+      };
+    });
   }, []);
 
   const pause = useCallback(() => {
@@ -303,30 +318,26 @@ export function usePomodoroTimer({
   }, []);
 
   const reset = useCallback(() => {
-    // Reset only the current phase timer (not cycles)
+    // Reinicia apenas o timer da fase atual (não zera ciclos).
+    // Para o timer: o usuário decide quando retomar clicando "Iniciar".
     const now = Date.now();
-    setSession((prev) => {
-      const phase = (prev.previousPhase ?? prev.currentPhase) as TimerPhase;
-      const actualPhase: TimerPhase = phase === "paused" ? "focus" : phase;
-      const duration = phaseDurationMs(actualPhase, prev.settings);
-      return {
-        ...prev,
-        currentPhase: actualPhase,
-        currentPhaseStartedAt: now,
-        remainingMs: duration,
-        pausedAt: undefined,
-        isRunning: false,
-      };
-    });
-    setRemainingMs(
-      phaseDurationMs(
-        ((session.previousPhase ?? session.currentPhase) as TimerPhase) === "paused"
-          ? "focus"
-          : ((session.previousPhase ?? session.currentPhase) as TimerPhase),
-        session.settings
-      )
-    );
-  }, [session]);
+    const s = sessionRef.current;
+    // Usa currentPhase diretamente (não previousPhase) para não saltar de fase
+    const actualPhase = (
+      s.currentPhase === "paused" ? (s.previousPhase ?? "focus") : s.currentPhase
+    ) as TimerPhase;
+    const duration = phaseDurationMs(actualPhase, s.settings);
+
+    setRemainingMs(duration);
+    setSession((prev) => ({
+      ...prev,
+      currentPhase: actualPhase,
+      currentPhaseStartedAt: now,
+      remainingMs: duration,
+      pausedAt: undefined,
+      isRunning: false,
+    }));
+  }, []);
 
   const skip = useCallback(() => {
     advancePhase(sessionRef.current);
