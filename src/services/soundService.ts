@@ -9,7 +9,9 @@
  */
 
 // MP3 file served from the public folder (Vite copies it as-is to dist/).
-const CHIME_SRC = "/chime.mp3";
+// BASE_URL keeps the path valid when the app is served under a reverse-proxy
+// subpath such as /pomodoro/.
+const CHIME_SRC = `${import.meta.env.BASE_URL}chime.mp3`;
 
 let _audio: HTMLAudioElement | null = null;
 let _unlocked = false;
