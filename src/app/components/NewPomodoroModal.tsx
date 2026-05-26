@@ -160,7 +160,7 @@ export function NewPomodoroModal({ open, onOpenChange, onStart }: NewPomodoroMod
 
               <div className="space-y-2">
                 <Label.Root htmlFor="cycles" className="block">
-                  Ciclos até pausa longa
+                  Ciclos por sessão
                 </Label.Root>
                 <input
                   id="cycles"

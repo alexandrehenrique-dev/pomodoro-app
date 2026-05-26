@@ -8,6 +8,7 @@ import {
   Coffee,
   Brain,
   VolumeX,
+  Trophy,
 } from "lucide-react";
 import { toast } from "sonner";
 import { usePomodoroTimer } from "../../hooks/usePomodoroTimer";
@@ -55,19 +56,21 @@ export function PomodoroTimer({
   const isIdle = currentPhase === "idle";
   const isRunning = session.isRunning;
   const isPaused = currentPhase === "paused";
+  const isCompleted = currentPhase === "completed";
 
   const displayPhase =
     currentPhase === "paused" ? previousPhase ?? "focus" : currentPhase;
 
   // Toast on phase advance
   useEffect(() => {
-    if (currentPhase === "shortBreak") {
-      toast.success("Ciclo de foco concluído! 🎉", {
-        description: "Hora da pausa curta. Relaxe um pouco!",
+    if (currentPhase === "completed") {
+      toast.success("Sessão concluída! 🎉", {
+        description: `${completedFocusCycles} ciclos de foco completados. Ótimo trabalho!`,
+        duration: 6000,
       });
-    } else if (currentPhase === "longBreak") {
-      toast.success("Ciclo de foco concluído! 🎉", {
-        description: "Hora da pausa longa. Descanse bem!",
+    } else if (currentPhase === "shortBreak") {
+      toast.success("Ciclo de foco concluído!", {
+        description: "Hora da pausa curta. Relaxe um pouco!",
       });
     } else if (currentPhase === "focus" && completedFocusCycles > 0) {
       toast.info("Pausa concluída! 💪", {
@@ -154,15 +157,23 @@ export function PomodoroTimer({
 
         {/* Timer Display */}
         <div className="px-6 py-12 text-center">
-          <div className="mb-4 inline-flex items-center gap-2 rounded-full bg-muted px-4 py-1.5">
-            <span className="text-sm font-medium">{getPhaseLabel()}</span>
-            {isPaused && (
-              <span className="inline-flex h-2 w-2 rounded-full bg-destructive" />
-            )}
-          </div>
+          {/* Phase badge */}
+          {isCompleted ? (
+            <div className="mb-4 inline-flex items-center gap-2 rounded-full bg-primary px-4 py-1.5 text-primary-foreground">
+              <Trophy className="h-4 w-4" />
+              <span className="text-sm font-medium">Sessão concluída!</span>
+            </div>
+          ) : (
+            <div className="mb-4 inline-flex items-center gap-2 rounded-full bg-muted px-4 py-1.5">
+              <span className="text-sm font-medium">{getPhaseLabel()}</span>
+              {isPaused && (
+                <span className="inline-flex h-2 w-2 rounded-full bg-destructive" />
+              )}
+            </div>
+          )}
 
           <div className="mb-8 font-mono text-7xl font-light tracking-tight md:text-8xl">
-            {formatMs(remainingMs)}
+            {isCompleted ? "00:00" : formatMs(remainingMs)}
           </div>
 
           <Progress.Root
@@ -178,68 +189,86 @@ export function PomodoroTimer({
           <div className="mt-6 text-sm text-muted-foreground">
             Ciclos concluídos:{" "}
             <span className="font-medium text-foreground">{completedFocusCycles}</span>
+            {!isCompleted && (
+              <span className="ml-1 text-muted-foreground">
+                / {settings.cyclesBeforeLongBreak}
+              </span>
+            )}
           </div>
         </div>
 
         {/* Controls */}
         <div className="border-t border-border bg-muted/30 px-6 py-4">
           <div className="flex flex-wrap justify-center gap-3">
-            {/*
-              Fluxo contínuo: o usuário clica "Iniciar" uma única vez.
-              Após cada fase, a próxima começa automaticamente (isRunning permanece true).
-              "Iniciar" só aparece em dois casos:
-                1. Estado inicial (idle)
-                2. Após reset manual (timer parado, fase definida)
-            */}
-            {!isRunning && !isPaused && (
+
+            {/* ── Estado: concluída ── apenas "Encerrar sessão" */}
+            {isCompleted && (
               <button
-                onClick={start}
+                onClick={end}
                 className="flex items-center gap-2 rounded-lg bg-primary px-6 py-2.5 text-primary-foreground shadow-sm transition-all hover:opacity-90"
               >
-                <Play className="h-4 w-4" />
-                {isIdle ? "Iniciar" : "Iniciar"}
+                <Trophy className="h-4 w-4" />
+                Encerrar sessão
               </button>
             )}
 
-            {/* Pausar — para o timer; "Continuar" retoma de onde parou */}
-            {isRunning && (
-              <button
-                onClick={pause}
-                className="flex items-center gap-2 rounded-lg bg-primary px-6 py-2.5 text-primary-foreground shadow-sm transition-all hover:opacity-90"
-              >
-                <Pause className="h-4 w-4" />
-                Pausar
-              </button>
-            )}
-
-            {isPaused && (
-              <button
-                onClick={resume}
-                className="flex items-center gap-2 rounded-lg bg-primary px-6 py-2.5 text-primary-foreground shadow-sm transition-all hover:opacity-90"
-              >
-                <Play className="h-4 w-4" />
-                Continuar
-              </button>
-            )}
-
-            {/* Resetar e Avançar só fazem sentido após o Iniciar inicial */}
-            {!isIdle && (
+            {/* ── Estados ativos ── */}
+            {!isCompleted && (
               <>
-                <button
-                  onClick={reset}
-                  className="flex items-center gap-2 rounded-lg border border-border bg-background px-4 py-2.5 transition-colors hover:bg-muted"
-                >
-                  <RotateCcw className="h-4 w-4" />
-                  Resetar
-                </button>
+                {/*
+                  Fluxo contínuo: o usuário clica "Iniciar" uma única vez.
+                  Após cada fase, a próxima começa automaticamente (isRunning permanece true).
+                  "Iniciar" reaparece apenas após reset manual.
+                */}
+                {!isRunning && !isPaused && (
+                  <button
+                    onClick={start}
+                    className="flex items-center gap-2 rounded-lg bg-primary px-6 py-2.5 text-primary-foreground shadow-sm transition-all hover:opacity-90"
+                  >
+                    <Play className="h-4 w-4" />
+                    Iniciar
+                  </button>
+                )}
 
-                <button
-                  onClick={skip}
-                  className="flex items-center gap-2 rounded-lg border border-border bg-background px-4 py-2.5 transition-colors hover:bg-muted"
-                >
-                  <SkipForward className="h-4 w-4" />
-                  Avançar
-                </button>
+                {isRunning && (
+                  <button
+                    onClick={pause}
+                    className="flex items-center gap-2 rounded-lg bg-primary px-6 py-2.5 text-primary-foreground shadow-sm transition-all hover:opacity-90"
+                  >
+                    <Pause className="h-4 w-4" />
+                    Pausar
+                  </button>
+                )}
+
+                {isPaused && (
+                  <button
+                    onClick={resume}
+                    className="flex items-center gap-2 rounded-lg bg-primary px-6 py-2.5 text-primary-foreground shadow-sm transition-all hover:opacity-90"
+                  >
+                    <Play className="h-4 w-4" />
+                    Continuar
+                  </button>
+                )}
+
+                {!isIdle && (
+                  <>
+                    <button
+                      onClick={reset}
+                      className="flex items-center gap-2 rounded-lg border border-border bg-background px-4 py-2.5 transition-colors hover:bg-muted"
+                    >
+                      <RotateCcw className="h-4 w-4" />
+                      Resetar
+                    </button>
+
+                    <button
+                      onClick={skip}
+                      className="flex items-center gap-2 rounded-lg border border-border bg-background px-4 py-2.5 transition-colors hover:bg-muted"
+                    >
+                      <SkipForward className="h-4 w-4" />
+                      Avançar
+                    </button>
+                  </>
+                )}
               </>
             )}
           </div>

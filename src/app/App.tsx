@@ -90,7 +90,11 @@ export default function App() {
         settings: session.settings,
         totalDurationMs: Date.now() - session.startedAt,
         status:
-          session.completedFocusCycles > 0 ? "manually_ended" : "abandoned",
+          session.currentPhase === "completed"
+            ? "completed"
+            : session.completedFocusCycles > 0
+              ? "manually_ended"
+              : "abandoned",
       };
       PomodoroStorage.addHistoryItem(historyItem);
 

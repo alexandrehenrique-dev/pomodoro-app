@@ -14,7 +14,7 @@ import { PomodoroStorage } from "../services/pomodoroStorage";
 import { playChime } from "../services/soundService";
 import { minToMs } from "../utils/time";
 
-export type TimerPhase = "focus" | "shortBreak" | "longBreak";
+export type TimerPhase = "focus" | "shortBreak" | "longBreak"; // longBreak mantido para cálculo de duração
 
 export interface UsePomodoroTimerOptions {
   taskName: string;
@@ -61,20 +61,10 @@ function phaseDurationMs(phase: TimerPhase, settings: PomodoroSettings): number 
   }
 }
 
-function nextPhase(
-  current: TimerPhase,
-  completedCyclesInBlock: number,
-  settings: PomodoroSettings
-): { phase: TimerPhase; newCompletedCycles: number; newBlock: number } {
-  if (current === "focus") {
-    const newBlock = completedCyclesInBlock + 1;
-    if (newBlock >= settings.cyclesBeforeLongBreak) {
-      return { phase: "longBreak", newCompletedCycles: 0, newBlock: 0 };
-    }
-    return { phase: "shortBreak", newCompletedCycles: newBlock, newBlock };
-  }
-  // After any break, go back to focus
-  return { phase: "focus", newCompletedCycles: completedCyclesInBlock, newBlock: completedCyclesInBlock };
+// Transição de fase no fluxo contínuo (sem longBreak automático).
+// A conclusão da sessão é tratada em advancePhase antes de chamar esta função.
+function nextPhase(current: TimerPhase): "focus" | "shortBreak" {
+  return current === "focus" ? "shortBreak" : "focus";
 }
 
 function createInitialSession(
@@ -142,56 +132,66 @@ export function usePomodoroTimer({
         ? fromSession.completedFocusCycles + 1
         : fromSession.completedFocusCycles;
 
-      const { phase, newBlock } = nextPhase(
-        current,
-        fromSession.completedCyclesInCurrentBlock,
-        fromSession.settings
-      );
+      const fireSound = () => {
+        if (fromSession.settings.soundEnabled) {
+          playChime().then((ok) => { if (!ok) setSoundFailed(true); });
+        }
+      };
 
+      const fireNotification = (title: string, body: string) => {
+        if (
+          fromSession.settings.notificationsEnabled &&
+          "Notification" in window &&
+          Notification.permission === "granted"
+        ) {
+          try { new Notification(title, { body }); } catch { /* opcional */ }
+        }
+      };
+
+      // ── Conclusão: todos os ciclos de foco foram completados ────────────────
+      if (isFocus && newTotalCycles >= fromSession.settings.cyclesBeforeLongBreak) {
+        setSession({
+          ...fromSession,
+          currentPhase: "completed",
+          previousPhase: "focus",
+          isRunning: false,
+          completedFocusCycles: newTotalCycles,
+          remainingMs: 0,
+        });
+        setRemainingMs(0);
+        fireSound();
+        fireNotification(
+          "Sessão concluída! 🎉",
+          `${newTotalCycles} ciclos de foco completados.`
+        );
+        return;
+      }
+
+      // ── Transição normal: foco → pausa curta → foco → ... ──────────────────
+      const nextPh = nextPhase(current);
+      const newBlock = isFocus
+        ? fromSession.completedCyclesInCurrentBlock + 1
+        : fromSession.completedCyclesInCurrentBlock;
       const now = Date.now();
-      const newSession: ActivePomodoroSession = {
+
+      setSession({
         ...fromSession,
-        currentPhase: phase,
+        currentPhase: nextPh,
         previousPhase: current,
         currentPhaseStartedAt: now,
         pausedAt: undefined,
-        remainingMs: phaseDurationMs(phase, fromSession.settings),
+        remainingMs: phaseDurationMs(nextPh, fromSession.settings),
         completedFocusCycles: newTotalCycles,
         completedCyclesInCurrentBlock: newBlock,
-        // Mantém isRunning do estado anterior: se estava rodando, a próxima fase
-        // inicia automaticamente (fluxo contínuo do método Pomodoro).
+        // Mantém isRunning: fluxo contínuo (não interrompe entre fases)
         isRunning: fromSession.isRunning,
-      };
-
-      setSession(newSession);
-      setRemainingMs(phaseDurationMs(phase, fromSession.settings));
-
-      // Play sound
-      if (fromSession.settings.soundEnabled) {
-        playChime().then((ok) => {
-          if (!ok) setSoundFailed(true);
-        });
-      }
-
-      // Optional: browser notification
-      if (
-        fromSession.settings.notificationsEnabled &&
-        "Notification" in window &&
-        Notification.permission === "granted"
-      ) {
-        try {
-          new Notification(
-            isFocus ? "Ciclo de foco concluído! 🎉" : "Pausa encerrada! 💪",
-            {
-              body: isFocus
-                ? "Hora de descansar."
-                : "Pronto para o próximo ciclo?",
-            }
-          );
-        } catch {
-          // ignore — notifications are optional
-        }
-      }
+      });
+      setRemainingMs(phaseDurationMs(nextPh, fromSession.settings));
+      fireSound();
+      fireNotification(
+        isFocus ? "Ciclo de foco concluído! 🎉" : "Pausa encerrada! 💪",
+        isFocus ? "Hora de descansar." : "Pronto para o próximo ciclo?"
+      );
     },
     []
   );
@@ -199,7 +199,12 @@ export function usePomodoroTimer({
   // ─── Tick ───────────────────────────────────────────────────────────────────
   const tick = useCallback(() => {
     const s = sessionRef.current;
-    if (!s.isRunning || s.currentPhase === "idle" || s.currentPhase === "paused") return;
+    if (
+      !s.isRunning ||
+      s.currentPhase === "idle" ||
+      s.currentPhase === "paused" ||
+      s.currentPhase === "completed"
+    ) return;
 
     const elapsed = Date.now() - s.currentPhaseStartedAt;
     const duration = phaseDurationMs(s.currentPhase as TimerPhase, s.settings);
@@ -320,8 +325,11 @@ export function usePomodoroTimer({
   const reset = useCallback(() => {
     // Reinicia apenas o timer da fase atual (não zera ciclos).
     // Para o timer: o usuário decide quando retomar clicando "Iniciar".
-    const now = Date.now();
     const s = sessionRef.current;
+    // Não faz nada se a sessão já terminou ou ainda não iniciou
+    if (s.currentPhase === "completed" || s.currentPhase === "idle") return;
+
+    const now = Date.now();
     // Usa currentPhase diretamente (não previousPhase) para não saltar de fase
     const actualPhase = (
       s.currentPhase === "paused" ? (s.previousPhase ?? "focus") : s.currentPhase
@@ -340,7 +348,10 @@ export function usePomodoroTimer({
   }, []);
 
   const skip = useCallback(() => {
-    advancePhase(sessionRef.current);
+    const s = sessionRef.current;
+    // Não avança se a sessão já terminou ou ainda não iniciou
+    if (s.currentPhase === "completed" || s.currentPhase === "idle") return;
+    advancePhase(s);
   }, [advancePhase]);
 
   const end = useCallback(() => {
@@ -350,15 +361,15 @@ export function usePomodoroTimer({
   }, [onSessionEnd]);
 
   // ─── Progress ───────────────────────────────────────────────────────────────
-  const actualPhase =
-    session.currentPhase === "paused"
-      ? ((session.previousPhase ?? "focus") as TimerPhase)
-      : (session.currentPhase as TimerPhase);
-  const duration = phaseDurationMs(
-    actualPhase === "idle" || actualPhase === "completed" ? "focus" : actualPhase,
-    session.settings
-  );
-  const progressPct = duration > 0 ? ((duration - remainingMs) / duration) * 100 : 0;
+  const progressPct = (() => {
+    if (session.currentPhase === "completed") return 100;
+    const actualPhase =
+      session.currentPhase === "paused"
+        ? ((session.previousPhase ?? "focus") as TimerPhase)
+        : (session.currentPhase as TimerPhase);
+    const duration = phaseDurationMs(actualPhase, session.settings);
+    return duration > 0 ? ((duration - remainingMs) / duration) * 100 : 0;
+  })();
 
   return {
     session,
