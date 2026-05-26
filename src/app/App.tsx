@@ -32,6 +32,14 @@ export interface SessionHistoryItem {
   status: "completed" | "interrupted";
 }
 
+function createSessionId() {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+
+  return `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
 // ─── App ──────────────────────────────────────────────────────────────────────
 
 export default function App() {
@@ -73,7 +81,7 @@ export default function App() {
     (session: ActivePomodoroSession) => {
       // Save to persistent history
       const historyItem: PomodoroHistoryItem = {
-        id: crypto.randomUUID(),
+        id: createSessionId(),
         taskName: session.task.name,
         taskDescription: session.task.description,
         startedAt: new Date(session.startedAt).toISOString(),

@@ -39,7 +39,16 @@ export interface UsePomodoroTimerReturn {
   clearSoundFailed: () => void;
 }
 
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
+
+function createPomodoroId() {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+
+  return `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
 
 function phaseDurationMs(phase: TimerPhase, settings: PomodoroSettings): number {
   switch (phase) {
@@ -75,9 +84,9 @@ function createInitialSession(
 ): ActivePomodoroSession {
   const now = Date.now();
   return {
-    id: crypto.randomUUID(),
+    id: createPomodoroId(),
     task: {
-      id: crypto.randomUUID(),
+      id: createPomodoroId(),
       name: taskName,
       description: taskDescription,
       createdAt: new Date().toISOString(),
