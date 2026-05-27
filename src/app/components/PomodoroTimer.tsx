@@ -7,15 +7,16 @@ import {
   X,
   Coffee,
   Brain,
+  Volume2,
   VolumeX,
   Trophy,
 } from "lucide-react";
 import { toast } from "sonner";
+import { useEffect, useRef } from "react";
 import { usePomodoroTimer } from "../../hooks/usePomodoroTimer";
 import type { PomodoroSettings, ActivePomodoroSession } from "../../types/pomodoro";
 import { PomodoroStorage } from "../../services/pomodoroStorage";
 import { formatMs } from "../../utils/time";
-import { useEffect } from "react";
 
 interface PomodoroTimerProps {
   taskName: string;
@@ -44,6 +45,7 @@ export function PomodoroTimer({
     end,
     soundFailed,
     clearSoundFailed,
+    audioUnlocked,
   } = usePomodoroTimer({
     taskName,
     taskDescription,
@@ -60,6 +62,18 @@ export function PomodoroTimer({
 
   const displayPhase =
     currentPhase === "paused" ? previousPhase ?? "focus" : currentPhase;
+
+  // Show "Som ativado" toast once per component lifetime, on first unlock
+  const prevAudioUnlockedRef = useRef(audioUnlocked);
+  useEffect(() => {
+    if (audioUnlocked && !prevAudioUnlockedRef.current) {
+      toast.success("Som ativado", {
+        description: "O alerta sonoro está pronto para esta sessão.",
+        duration: 2500,
+      });
+    }
+    prevAudioUnlockedRef.current = audioUnlocked;
+  }, [audioUnlocked]);
 
   // Toast on phase advance
   useEffect(() => {
@@ -83,12 +97,13 @@ export function PomodoroTimer({
     }
   }, [currentPhase]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Visual fallback when sound fails
+  // Visual fallback when sound fails (mobile-aware message)
   useEffect(() => {
     if (soundFailed) {
-      toast.warning("Sem som", {
+      toast.warning("Ciclo concluído — sem áudio", {
         description:
-          "Não foi possível tocar o áudio. Verifique as configurações do navegador.",
+          "O navegador bloqueou o som. Em mobile/iOS, o áudio pode não tocar em segundo plano. Verifique as configurações de som do dispositivo.",
+        duration: 8000,
         onDismiss: clearSoundFailed,
         onAutoClose: clearSoundFailed,
       });
@@ -124,7 +139,8 @@ export function PomodoroTimer({
         <div className="flex items-center gap-3 rounded-lg border border-destructive/50 bg-destructive/10 px-4 py-3 text-sm text-destructive">
           <VolumeX className="h-4 w-4 flex-shrink-0" />
           <span>
-            Áudio bloqueado pelo navegador. Interaja com a página para habilitar o som.
+            Áudio bloqueado pelo navegador. No iOS/mobile, sons podem não tocar em segundo plano —
+            o timer continua funcionando normalmente.
           </span>
           <button
             onClick={clearSoundFailed}
@@ -149,13 +165,24 @@ export function PomodoroTimer({
                 <p className="text-sm text-muted-foreground">{taskDescription}</p>
               )}
             </div>
-            <button
-              onClick={end}
-              className="rounded-lg p-2 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-              title="Encerrar sessão"
-            >
-              <X className="h-5 w-5" />
-            </button>
+            <div className="flex items-center gap-1">
+              {/* Audio unlock indicator */}
+              {audioUnlocked && (
+                <span
+                  title="Som ativado"
+                  className="rounded-lg p-2 text-muted-foreground"
+                >
+                  <Volume2 className="h-4 w-4" />
+                </span>
+              )}
+              <button
+                onClick={end}
+                className="rounded-lg p-2 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                title="Encerrar sessão"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
           </div>
         </div>
 
@@ -219,11 +246,6 @@ export function PomodoroTimer({
             {/* ── Estados ativos ── */}
             {!isCompleted && (
               <>
-                {/*
-                  Fluxo contínuo: o usuário clica "Iniciar" uma única vez.
-                  Após cada fase, a próxima começa automaticamente (isRunning permanece true).
-                  "Iniciar" reaparece apenas após reset manual.
-                */}
                 {!isRunning && !isPaused && (
                   <button
                     onClick={start}

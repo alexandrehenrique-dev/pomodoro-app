@@ -107,7 +107,20 @@ pomodoro:settings       — última configuração usada
 
 A Notifications API é opcional — se negada, o app funciona normalmente via toasts.
 
+## Testes manuais esperados
+
+| Cenário | Resultado esperado |
+|---|---|
+| Desktop, aba ativa | Alarme toca ao fim de cada ciclo |
+| Desktop, aba em segundo plano | Alarme toca; ao voltar, UI já mostra a fase correta |
+| Mobile, tela ativa (após clicar "Iniciar") | Alarme toca — áudio desbloqueado pelo gesto inicial |
+| Mobile, app em background por mais tempo que o ciclo | Timer corrige o tempo ao retornar; áudio pode ser bloqueado → fallback visual e vibração |
+| Reload durante ciclo ativo | Timer restaura da sessão salva e retoma a contagem correta |
+| iOS/Safari, aba minimizada | Timer avança corretamente ao retornar; som não garantido por política do sistema — aviso exibido |
+
+> **Nota iOS/Safari:** o sistema operacional suspende timers e contextos de áudio de abas em background. O app detecta o retorno via `visibilitychange`, `focus` e `pageshow` (bfcache), corrige o timer pelo relógio real e exibe fallback visual. Som em background bloqueado é comportamento intencional do sistema, não um bug.
+
 ## Limitações conhecidas
 
-- Áudio pode falhar em browsers com autoplay restrito (ex: Safari iOS) — fallback visual é exibido
-- Sem PWA/Service Worker: se o app for **fechado** (não só minimizado), o som não toca ao retornar
+- Áudio pode falhar em browsers com autoplay restrito (ex: Safari iOS) — fallback visual e vibração são exibidos
+- Sem PWA/Service Worker: se o app for **fechado** (não só minimizado), o timer não continua em background

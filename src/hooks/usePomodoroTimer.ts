@@ -1,20 +1,24 @@
 /**
  * usePomodoroTimer
  *
- * Robust timer hook using timestamps instead of just setInterval:
- *  - Uses `currentPhaseStartedAt` + `remainingMs` to calculate time left.
- *  - Handles Page Visibility API: when the tab becomes visible again it
- *    recalculates elapsed time and advances state if the cycle already ended.
- *  - Persists session to localStorage on every tick via PomodoroStorage.
+ * Robust timer hook using real-clock timestamps instead of just setInterval:
+ *  - Computes remaining = phaseDuration - (Date.now() - currentPhaseStartedAt).
+ *  - Handles three page-lifecycle events so the timer stays correct after
+ *    backgrounding: visibilitychange, window focus, and pageshow (iOS bfcache).
+ *  - All three handlers share a debounced `recalculateFromBackground` to prevent
+ *    double-advancing if multiple events fire in quick succession.
+ *  - Calls unlockAudio() on the first user gesture (start / resume) so the alarm
+ *    is primed before the first cycle ends.
+ *  - Persists session to localStorage on every state change via PomodoroStorage.
  */
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import type { ActivePomodoroSession, PomodoroSettings } from "../types/pomodoro";
 import { PomodoroStorage } from "../services/pomodoroStorage";
-import { playChime } from "../services/soundService";
+import { playChime, unlockAudio, isAudioUnlocked } from "../services/soundService";
 import { minToMs } from "../utils/time";
 
-export type TimerPhase = "focus" | "shortBreak" | "longBreak"; // longBreak mantido para cálculo de duração
+export type TimerPhase = "focus" | "shortBreak" | "longBreak";
 
 export interface UsePomodoroTimerOptions {
   taskName: string;
@@ -37,6 +41,8 @@ export interface UsePomodoroTimerReturn {
   /** Whether the last sound attempt failed (show visual alert) */
   soundFailed: boolean;
   clearSoundFailed: () => void;
+  /** Whether audio has been unlocked via a user gesture in this session */
+  audioUnlocked: boolean;
 }
 
 
@@ -71,7 +77,7 @@ function phaseDurationMs(phase: TimerPhase, settings: PomodoroSettings): number 
  * A verificação de conclusão (>= totalCycles) acontece em advancePhase ANTES desta função,
  * portanto aqui `newTotalCycles` nunca atinge o limite de encerramento.
  */
-const LONG_BREAK_INTERVAL = 4; // Número de focos antes de uma pausa longa (clássico Pomodoro)
+const LONG_BREAK_INTERVAL = 4;
 
 function nextPhase(current: TimerPhase, newTotalCycles: number): TimerPhase {
   if (current !== "focus") return "focus";
@@ -125,9 +131,15 @@ export function usePomodoroTimer({
 
   const [soundFailed, setSoundFailed] = useState(false);
 
+  // Initialized from module singleton so it survives remounts within the same page load
+  const [audioUnlocked, setAudioUnlocked] = useState(isAudioUnlocked);
+
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const sessionRef = useRef(session);
   sessionRef.current = session;
+
+  // Prevents double-advance when visibilitychange + focus fire together
+  const lastRecalcRef = useRef(0);
 
   // ─── Persist on every session change ───────────────────────────────────────
   useEffect(() => {
@@ -172,7 +184,7 @@ export function usePomodoroTimer({
         setRemainingMs(0);
         fireSound();
         fireNotification(
-          "Sessão concluída! 🎉",
+          "Sessão concluída!",
           `${newTotalCycles} ciclos de foco completados.`
         );
         return;
@@ -194,18 +206,44 @@ export function usePomodoroTimer({
         remainingMs: phaseDurationMs(nextPh, fromSession.settings),
         completedFocusCycles: newTotalCycles,
         completedCyclesInCurrentBlock: newBlock,
-        // Mantém isRunning: fluxo contínuo (não interrompe entre fases)
         isRunning: fromSession.isRunning,
       });
       setRemainingMs(phaseDurationMs(nextPh, fromSession.settings));
       fireSound();
       fireNotification(
-        isFocus ? "Ciclo de foco concluído! 🎉" : "Pausa encerrada! 💪",
+        isFocus ? "Ciclo de foco concluído!" : "Pausa encerrada!",
         isFocus ? "Hora de descansar." : "Pronto para o próximo ciclo?"
       );
     },
     []
   );
+
+  // ─── Shared background-recalculation (debounced 800 ms) ────────────────────
+  // Used by visibilitychange, focus, and pageshow handlers to avoid double-advance
+  // when multiple lifecycle events fire in rapid succession (common on desktop).
+  const recalculateFromBackground = useCallback(() => {
+    const now = Date.now();
+    if (now - lastRecalcRef.current < 800) return;
+    lastRecalcRef.current = now;
+
+    const s = sessionRef.current;
+    if (
+      !s.isRunning ||
+      s.currentPhase === "idle" ||
+      s.currentPhase === "paused" ||
+      s.currentPhase === "completed"
+    ) return;
+
+    const elapsed = now - s.currentPhaseStartedAt;
+    const duration = phaseDurationMs(s.currentPhase as TimerPhase, s.settings);
+    const remaining = Math.max(0, duration - elapsed);
+
+    if (remaining === 0) {
+      advancePhase(s);
+    } else {
+      setRemainingMs(remaining);
+    }
+  }, [advancePhase]);
 
   // ─── Tick ───────────────────────────────────────────────────────────────────
   const tick = useCallback(() => {
@@ -222,8 +260,6 @@ export function usePomodoroTimer({
     const remaining = Math.max(0, duration - elapsed);
 
     setRemainingMs(remaining);
-
-    // Also keep remainingMs in session for persistence across reloads
     setSession((prev) => ({ ...prev, remainingMs: remaining }));
 
     if (remaining === 0) {
@@ -245,38 +281,41 @@ export function usePomodoroTimer({
 
   // ─── Page Visibility API ────────────────────────────────────────────────────
   useEffect(() => {
-    const handleVisibilityChange = () => {
-      if (document.hidden) return;
+    const handle = () => { if (!document.hidden) recalculateFromBackground(); };
+    document.addEventListener("visibilitychange", handle);
+    return () => document.removeEventListener("visibilitychange", handle);
+  }, [recalculateFromBackground]);
 
-      const s = sessionRef.current;
-      if (!s.isRunning || s.currentPhase === "idle") return;
+  // ─── Window focus (secondary signal — covered by debounce) ──────────────────
+  useEffect(() => {
+    window.addEventListener("focus", recalculateFromBackground);
+    return () => window.removeEventListener("focus", recalculateFromBackground);
+  }, [recalculateFromBackground]);
 
-      // Recalculate how much time has passed
-      const elapsed = Date.now() - s.currentPhaseStartedAt;
-      const duration = phaseDurationMs(s.currentPhase as TimerPhase, s.settings);
-      const remaining = Math.max(0, duration - elapsed);
-
-      if (remaining === 0) {
-        // Phase ended while tab was hidden — advance immediately
-        advancePhase(s);
-      } else {
-        setRemainingMs(remaining);
-      }
+  // ─── pageshow — iOS Safari bfcache restore ──────────────────────────────────
+  // Safari on iOS can freeze/restore pages from the back-forward cache without
+  // firing visibilitychange. `pageshow` with `e.persisted === true` is the only
+  // reliable signal for bfcache restores.
+  useEffect(() => {
+    const handle = (e: PageTransitionEvent) => {
+      if (e.persisted) recalculateFromBackground();
     };
-
-    document.addEventListener("visibilitychange", handleVisibilityChange);
-    return () => {
-      document.removeEventListener("visibilitychange", handleVisibilityChange);
-    };
-  }, [advancePhase]);
+    window.addEventListener("pageshow", handle);
+    return () => window.removeEventListener("pageshow", handle);
+  }, [recalculateFromBackground]);
 
   // ─── Controls ───────────────────────────────────────────────────────────────
 
   const start = useCallback(() => {
+    // Unlock audio from this user gesture so the alarm can play later without
+    // another interaction. Fire-and-forget — never block the UI on audio init.
+    unlockAudio().then(() => {
+      if (isAudioUnlocked()) setAudioUnlocked(true);
+    });
+
     const now = Date.now();
     setSession((prev) => {
       if (prev.currentPhase === "idle") {
-        // Primeira vez: inicializa no modo foco
         return {
           ...prev,
           currentPhase: "focus",
@@ -286,8 +325,6 @@ export function usePomodoroTimer({
           isRunning: true,
         };
       }
-      // Pós-reset: fase e duração já estão corretos; apenas dispara o timer
-      // a partir de agora (currentPhaseStartedAt = now garante sem drift)
       return {
         ...prev,
         currentPhaseStartedAt: now,
@@ -317,11 +354,15 @@ export function usePomodoroTimer({
   }, []);
 
   const resume = useCallback(() => {
+    // Also a user gesture — try to unlock audio if not already done.
+    unlockAudio().then(() => {
+      if (isAudioUnlocked()) setAudioUnlocked(true);
+    });
+
     const now = Date.now();
     setSession((prev) => {
       const actualPhase = (prev.previousPhase ?? "focus") as TimerPhase;
       const remaining = prev.remainingMs ?? phaseDurationMs(actualPhase, prev.settings);
-      // Recalculate startedAt so that elapsed = duration - remaining at this moment
       const newStartedAt = now - (phaseDurationMs(actualPhase, prev.settings) - remaining);
       return {
         ...prev,
@@ -334,14 +375,10 @@ export function usePomodoroTimer({
   }, []);
 
   const reset = useCallback(() => {
-    // Reinicia apenas o timer da fase atual (não zera ciclos).
-    // Para o timer: o usuário decide quando retomar clicando "Iniciar".
     const s = sessionRef.current;
-    // Não faz nada se a sessão já terminou ou ainda não iniciou
     if (s.currentPhase === "completed" || s.currentPhase === "idle") return;
 
     const now = Date.now();
-    // Usa currentPhase diretamente (não previousPhase) para não saltar de fase
     const actualPhase = (
       s.currentPhase === "paused" ? (s.previousPhase ?? "focus") : s.currentPhase
     ) as TimerPhase;
@@ -360,7 +397,6 @@ export function usePomodoroTimer({
 
   const skip = useCallback(() => {
     const s = sessionRef.current;
-    // Não avança se a sessão já terminou ou ainda não iniciou
     if (s.currentPhase === "completed" || s.currentPhase === "idle") return;
     advancePhase(s);
   }, [advancePhase]);
@@ -394,5 +430,6 @@ export function usePomodoroTimer({
     end,
     soundFailed,
     clearSoundFailed: () => setSoundFailed(false),
+    audioUnlocked,
   };
 }

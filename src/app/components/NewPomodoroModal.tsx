@@ -2,7 +2,7 @@ import { useState } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
 import * as Label from "@radix-ui/react-label";
 import * as Switch from "@radix-ui/react-switch";
-import { X, Volume2 } from "lucide-react";
+import { X, Volume2, VolumeX } from "lucide-react";
 import type { PomodoroConfig } from "../App";
 import { PomodoroStorage } from "../../services/pomodoroStorage";
 import { unlockAudio, playChime } from "../../services/soundService";
@@ -25,10 +25,14 @@ export function NewPomodoroModal({ open, onOpenChange, onStart }: NewPomodoroMod
     saved.cyclesBeforeLongBreak
   );
   const [soundEnabled, setSoundEnabled] = useState(saved.soundEnabled);
+  const [soundTestFailed, setSoundTestFailed] = useState(false);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = (e: { preventDefault(): void }) => {
     e.preventDefault();
     if (!taskName.trim()) return;
+
+    // User gesture — prime audio context so the alarm works without a further tap.
+    unlockAudio();
 
     // Persist settings for next time
     PomodoroStorage.saveSettings({
@@ -55,15 +59,10 @@ export function NewPomodoroModal({ open, onOpenChange, onStart }: NewPomodoroMod
   };
 
   const handleTestSound = async () => {
-    // This is a user gesture — use it to unlock audio
+    setSoundTestFailed(false);
     await unlockAudio();
     const ok = await playChime();
-    if (!ok) {
-      // eslint-disable-next-line no-alert
-      alert(
-        "Não foi possível tocar o áudio. Verifique se o navegador está bloqueando o som."
-      );
-    }
+    if (!ok) setSoundTestFailed(true);
   };
 
   return (
@@ -175,33 +174,46 @@ export function NewPomodoroModal({ open, onOpenChange, onStart }: NewPomodoroMod
             </div>
 
             {/* Sound Settings */}
-            <div className="flex items-center justify-between rounded-lg border border-border bg-muted/30 p-4">
-              <div className="flex-1">
-                <Label.Root htmlFor="sound" className="block cursor-pointer">
-                  Som ativado
-                </Label.Root>
-                <p className="mt-0.5 text-sm text-muted-foreground">
-                  Tocar som ao completar cada fase
-                </p>
+            <div className="space-y-2">
+              <div className="flex items-center justify-between rounded-lg border border-border bg-muted/30 p-4">
+                <div className="flex-1">
+                  <Label.Root htmlFor="sound" className="block cursor-pointer">
+                    Som ativado
+                  </Label.Root>
+                  <p className="mt-0.5 text-sm text-muted-foreground">
+                    Tocar som ao completar cada fase
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={handleTestSound}
+                    className="rounded-lg p-2 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                    title="Testar som"
+                  >
+                    <Volume2 className="h-5 w-5" />
+                  </button>
+                  <Switch.Root
+                    id="sound"
+                    checked={soundEnabled}
+                    onCheckedChange={setSoundEnabled}
+                    className="relative h-6 w-11 rounded-full bg-switch-background transition-colors data-[state=checked]:bg-primary"
+                  >
+                    <Switch.Thumb className="block h-5 w-5 translate-x-0.5 rounded-full bg-switch-thumb shadow-sm transition-transform data-[state=checked]:translate-x-[1.375rem]" />
+                  </Switch.Root>
+                </div>
               </div>
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={handleTestSound}
-                  className="rounded-lg p-2 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-                  title="Testar som"
-                >
-                  <Volume2 className="h-5 w-5" />
-                </button>
-                <Switch.Root
-                  id="sound"
-                  checked={soundEnabled}
-                  onCheckedChange={setSoundEnabled}
-                  className="relative h-6 w-11 rounded-full bg-switch-background transition-colors data-[state=checked]:bg-primary"
-                >
-                  <Switch.Thumb className="block h-5 w-5 translate-x-0.5 rounded-full bg-switch-thumb shadow-sm transition-transform data-[state=checked]:translate-x-[1.375rem]" />
-                </Switch.Root>
-              </div>
+
+              {/* Inline feedback when test sound fails */}
+              {soundTestFailed && (
+                <div className="flex items-center gap-2 rounded-lg border border-destructive/50 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+                  <VolumeX className="h-3.5 w-3.5 flex-shrink-0" />
+                  <span>
+                    Não foi possível tocar o áudio. Verifique o volume e as permissões do navegador.
+                    No iOS/Safari, o áudio requer interação prévia com a página.
+                  </span>
+                </div>
+              )}
             </div>
 
             {/* Actions */}
